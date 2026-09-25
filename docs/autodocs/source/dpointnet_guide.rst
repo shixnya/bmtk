@@ -961,6 +961,7 @@ Default Callbacks class
             "starting_epoch": 0,
             "callbacks_dir": "training_callbacks_intro_l4_overall_distribution",
             "verbose": "on_step",
+            "memory_report": "epoch",
             "epoch_store_weights": "latest",
             "epoch_cache_weights": false,
             "sonata_output_dir": "network.trained_weights.best",
@@ -1013,6 +1014,38 @@ Default Callbacks class
         * - performance_table_csv
           -
           - performance.csv
+        * - memory_report
+          - ``epoch`` reports GPU memory at epoch end and once before epoch 1;
+            ``step`` additionally reports after each step; ``off`` disables
+            memory sampling and peak resets. Console output also follows ``verbose``.
+          - epoch
+
+Memory reports separate TensorFlow allocator current/peak allocation, the current
+process's driver-reported usage, and whole-device used/free/total memory, in GiB.
+Device usage includes other processes; driver process usage includes reservations
+and CUDA overhead outside TensorFlow allocation. Differences between these values
+are not a fragmentation measurement. Driver values are point-in-time samples, not
+peaks.
+
+TensorFlow peak statistics are reset at epoch start. The pre-epoch-1 sample captures
+earlier allocation history; epoch 1 includes any first-step tracing/compilation.
+Later reports label their reset interval. If a reset fails, the previous interval
+label is retained. In ``step`` mode, peaks remain cumulative within that interval,
+not per-step peaks. External resets of the same TensorFlow device statistics are
+not tracked by the callback.
+
+Unavailable telemetry is shown as ``n/a``. Driver attribution requires an
+unambiguous single-GPU mapping or UUID-based ``CUDA_VISIBLE_DEVICES`` without
+additional TensorFlow visibility filtering or virtual devices. Ambiguous numeric
+multi-GPU mappings and explicit MIG mappings are not guessed. Process usage may
+be unavailable when the driver PID namespace differs from the Python process.
+
+Performance CSV output retains ``resident_*_gib`` as whole-device metrics for
+compatibility and adds ``process_used_gib`` and ``tf_allocator_peak_scope``.
+The latter is a text-valued metric. Default epoch reporting no longer emits
+per-step memory rows; select ``memory_report="step"`` to retain them. Each report
+reuses one sample for CSV and console output. DPointNet logging has its own
+non-propagating logger to avoid duplicate output from configured root handlers.
 
 
 Building your own Callbacks class
@@ -1045,6 +1078,8 @@ Loss Functions
           - 
         * - TargetFiringRate
           - 
+        * - LowRateFloor
+          - One-sided squared firing-rate deficit for preventing low-rate collapse.
         * - OrientationSelectivityLoss
           -
         * - VoltageRegularization
@@ -1057,6 +1092,70 @@ Loss Functions
 
 
 
+
+
+Low-Rate Neuron Rescue
+^^^^^^^^^^^^^^^^^^^^^
+
+``LowRateFloor`` is an optional regularizer for neurons whose firing rates fall
+below a configured floor. It is independent of legacy/NEST dynamics and uses
+spikes, not voltages. It does not replace a firing-rate distribution target and
+does not penalize neurons at or above the floor.
+
+For spikes shaped ``[batch, time, neurons]`` and ``rnn.dt`` in milliseconds:
+
+.. math::
+
+    r_i = \frac{1000}{B T \Delta t}\sum_{b=1}^{B}\sum_{t=1}^{T}s_{bti},
+    \qquad
+    L = \frac{c}{|S|}\sum_{i\in S}\left[\max(0, f-r_i)\right]^2.
+
+Here ``floor_hz`` is :math:`f`, ``cost`` is :math:`c`, and :math:`S` is the
+selected neuron set. Rates are pooled across batch and time before applying the
+penalty; the denominator includes all selected neurons, not only low-rate ones.
+An empty selection returns zero. The whole supplied time window is used, without
+implicit trimming. Time length must be positive and statically known. The loss
+uses the existing compact temporal reduction, with FP32 batch averaging and
+penalty arithmetic, avoiding a full FP32 copy of mixed-precision spike outputs.
+
+Add this entry to a training parameter's ``loss_functions`` mapping:
+
+.. code:: json
+
+    {
+      "rate_floor": {
+        "module": "LowRateFloor",
+        "floor_hz": 0.1,
+        "cost": 1.0
+      }
+    }
+
+The constructor defaults are ``floor_hz=0.1`` and ``cost=1.0``; the loss is never
+enabled automatically. ``dt`` must be finite and positive, and floor/cost must be
+finite and nonnegative. Either zero floor or zero cost disables the penalty for
+nonnegative spikes. A coefficient of 10 scales the same deficit tenfold; it is
+not a universal recommendation.
+
+By default all neurons are selected without reading population files. Optional
+``neuron_ids`` are unique, nonnegative indices in model spike-column order, not
+arbitrary SONATA node IDs. Alternatively, use ``core_mask`` or ``core_radius``
+and optionally ``cell_types`` with the existing V1 population helpers and
+``data_dir``. Do not combine explicit IDs with core/cell-type selection. For the
+200-micrometer V1 core excitatory subset, specify ``core_radius=200.0`` and
+``cell_types=["L2/3 Exc", "L4 Exc", "L5 Exc", "L6 Exc"]`` with the appropriate
+data directory. Core/cell-type selection preserves the helpers' model ordering.
+
+Choose the subset and floor to avoid forcing biologically appropriate silent
+neurons to fire. The pooled rate quantum is ``1000 / (batch * time * dt)`` Hz.
+The loss gives an upward rate gradient below the floor, but rescue of network
+weights still requires a nonzero surrogate-gradient path through the cell; this
+is not guaranteed for deeply subthreshold neurons. Assess rate distributions,
+silent fractions, and the original fitting objective, not just this penalty.
+
+Configured losses participate in ordinary training and validation totals. A
+selection score that excludes rescue must be implemented explicitly by the
+experiment; this module does not silently alter checkpoint-selection policy.
+No project-specific registration call is required.
 
 
 Training Output

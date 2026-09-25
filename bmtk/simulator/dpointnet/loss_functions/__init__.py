@@ -5,6 +5,7 @@ from .voltage_regularization import VoltageRegularization
 from .synchronization_loss import SynchronizationLoss
 from .weight_regularization import EMDWeightRegularization
 from .delayed_association import DelayedAssociationLoss
+from .low_rate_floor import LowRateFloor
 
 
 class LossModules:
@@ -60,3 +61,4 @@ LossModules().add_module(VoltageRegularization, overwrite=False)
 LossModules().add_module(SynchronizationLoss, overwrite=False)
 LossModules().add_module(EMDWeightRegularization, overwrite=False)
 LossModules().add_module(DelayedAssociationLoss, overwrite=False)
+LossModules().add_module(LowRateFloor, overwrite=False)
