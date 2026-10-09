@@ -233,6 +233,15 @@ positive multiple of 0.001 ms, and external delays must be at least one step.
 Compatibility describes the implemented dynamics; numerical precision and
 fitted synaptic waveforms can still produce differences from a NEST simulation.
 
+For a runnable comparison, see
+:download:`the 300-neuron reset and precision example README
+<../../../examples/dpointnet_nest_comparison/README.md>` in the repository's
+``examples/dpointnet_nest_comparison/`` directory.
+It holds the network and replayed input fixed, compares FP32 and mixed
+precision under both reset policies, and includes an actual NEST reference
+through PointNet. Mixed/soft illustrates the standard forward settings
+without changing weights through training.
+
 For simulation only, omit ``training`` and retain ``inference``. For manual
 execution, use ``rnn.build()``, ``rnn.train()`` and ``rnn.run_inference()``;
 unlike ``run()``, ``run_inference()`` returns results without automatically
