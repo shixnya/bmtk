@@ -1,6 +1,6 @@
 # Per-device LGN input generation
 
-This opt-in pipeline adapts Javier Galvan's
+This pipeline adapts Javier Galvan's
 `stim_dataset.py:DriftingGratingLGN` and parameter-only input pipeline from
 `JavierGalvan9/V1_GLIF_model` at
 `2c52ec10c1eee409ddf900f8a5b8460cf9c46d24`. It concerns input placement and
@@ -9,7 +9,8 @@ inputs on local GPU strategies.
 
 ## Configuration
 
-Add `"use_device_generation": true` at the `lgn_tf` input-module level:
+Drifting-grating modules select this pipeline by default. The explicit
+`"use_device_generation": true` setting belongs at the `lgn_tf` input-module level:
 
 ```json
 {
@@ -28,8 +29,11 @@ Add `"use_device_generation": true` at the `lgn_tf` input-module level:
 }
 ```
 
-The setting defaults to false. It requires drifting gratings, an explicit
-stimulus seed or run default seed, and a local single-worker strategy. Existing
+The setting defaults to true for drifting gratings and false for gray-screen
+inputs. It requires an explicit stimulus seed or run default seed and a local
+single-worker strategy. Set `use_device_generation=false` explicitly when using
+an unsupported strategy, unseeded host generation or host firing-rate output;
+unsupported device requests raise rather than changing the input protocol. Existing
 fixed/list orientations, regular orientations, phase, rotation, contrast and
 pre/post delays retain their semantics. Direct `create_generator` calls remain
 the host-reference API; `DataIterator` selects the per-device batch path.

@@ -10,15 +10,15 @@ from .io_tools import io
 
 def resolve_acceleration_options(
     cell_params, *, compute_dtype, variable_dtype, batch_size, basis_width,
-    train_recurrent_per_type=True,
+    train_recurrent_per_type=False, canonical_gradient_boundary=True,
 ):
     """Resolve ``acceleration_profile="auto"`` without overriding explicit flags.
 
     The returned report is suitable for recording with execution provenance.
-    Omitting the profile preserves existing constructor defaults.
+    Omitting the profile selects auto; explicit None disables profile expansion.
     """
     options = dict(cell_params)
-    profile = options.pop("acceleration_profile", None)
+    profile = options.pop("acceleration_profile", "auto")
     if profile is None:
         return options, None
     if profile != "auto":
@@ -50,7 +50,7 @@ def resolve_acceleration_options(
         report["selected"][name] = options[name]
 
     numeric = compute_dtype in (tf.float16, tf.float32) and variable_dtype == tf.float32
-    nest = options.get("dynamics_mode", "legacy") == "nest"
+    nest = options.get("dynamics_mode", "nest") == "nest"
     pascal_nest = nest and architecture is not None and architecture < 70
     currents = numeric and csr_spike_ops.fused_cuda_available() and not pascal_nest
     select(
@@ -76,6 +76,16 @@ def resolve_acceleration_options(
         "general NEST/Pascal excluded",
     )
     state = options["use_fused_state"] is not False and numeric and four_basis and state_available and not pascal_nest
+    select("use_direct_state_rnn_loop", state and currents,
+           "compatible fused state/currents and explicit-state loop")
+    select("use_fused_nest_event_vjp", nest and state,
+           "compatible NEST state event gradients")
+    select("use_fused_state_history", nest and state,
+           "compatible NEST state/history")
+    select("use_native_voltage_penalty", state and options.get("track_voltage_penalty", True),
+           "compatible state and enabled online voltage penalty tracking")
+    select("use_forward_run_aggregation", currents and small_batch and four_basis,
+           "compatible batch1..32/four-basis CSR route")
     select("use_pair_projection", currents and known_batch,
            "compatible CSR library and known positive batch")
     select("use_fixed4_input_forward", currents and four_basis,
@@ -85,8 +95,8 @@ def resolve_acceleration_options(
     per_edge_training = options.get("train_recurrent", True) and not options.get(
         "train_recurrent_per_type", train_recurrent_per_type
     )
-    select("use_direct_csr_recurrent_gradient", currents and per_edge_training,
-           "compatible CSR library and trainable per-edge recurrent weights; canonical master ordering retained")
+    select("use_direct_csr_recurrent_gradient", currents and per_edge_training and canonical_gradient_boundary,
+           "compatible CSR library, per-edge weights and an enclosing canonical-gradient boundary")
     select("use_active_row_forward", currents and small_batch and four_basis,
            "compatible CSR library, batch1..32 and four bases")
     select("use_device_active_queue_forward", currents and small_batch and four_basis,
@@ -117,6 +127,8 @@ def resolve_acceleration_options(
         nest and state and glif_state_ops.fused_nest_type_indexed_coefficients_available(),
         "NEST and compatible type-indexed state entry points",
     )
+    select("use_static_type_indexed_nest_dispatch", False,
+           "static coefficient identity requires explicit opt-in; auto rechecks live coefficients")
     carry_route = options.get("temporal_gradient_precision") == "float32" or options.get(
         "use_direct_state_rnn_loop", False
     )

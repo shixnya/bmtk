@@ -37,6 +37,13 @@ from bmtk.simulator.dpointnet.state_modules.cached_states import CachedInitState
 from bmtk.simulator.dpointnet.state_modules.input_state import _complete_noise_state
 
 
+@pytest.fixture(autouse=True)
+def restore_precision_policy():
+    previous = tf.keras.mixed_precision.global_policy()
+    yield
+    tf.keras.mixed_precision.set_global_policy(previous)
+
+
 @pytest.mark.parametrize(
     "indices",
     [
@@ -121,6 +128,7 @@ def test_training_entry_points_reject_hard_reset(entry_point, prebuilt):
 
 def test_training_prepares_unbuilt_model_without_mutating_config(monkeypatch):
     rnn = RNN(cell_params={"dynamics_mode": "nest"})
+    original = dict(rnn.cell_params)
     build_calls = []
 
     def build(**kwargs):
@@ -133,7 +141,7 @@ def test_training_prepares_unbuilt_model_without_mutating_config(monkeypatch):
     rnn._prepare_training_model()
 
     assert build_calls == [{"training": True}]
-    assert rnn.cell_params == {"dynamics_mode": "nest"}
+    assert rnn.cell_params == original
 
 
 def test_train_without_engine_does_not_build_inference_model():
@@ -309,6 +317,7 @@ def test_segmented_recompute_matches_full_outputs_states_and_gradients():
     initial_state = tf.keras.layers.Input(shape=(1,), dtype=tf.float32)
     cell = tf.keras.layers.SimpleRNNCell(
         1,
+        dtype="float32",
         activation="tanh",
         use_bias=False,
         kernel_initializer=tf.keras.initializers.Constant(0.7),
@@ -363,6 +372,7 @@ def test_segmented_recompute_transforms_accumulated_variable_gradient_once():
     initial_state = tf.keras.layers.Input(shape=(1,), dtype=tf.float32)
     cell = tf.keras.layers.SimpleRNNCell(
         1,
+        dtype="float32",
         activation="tanh",
         use_bias=False,
         kernel_initializer=tf.keras.initializers.Constant(0.7),
@@ -621,6 +631,7 @@ def test_packed_segmented_recompute_matches_unpacked_outputs_and_gradients():
     initial_state = tf.keras.layers.Input(shape=(35,), dtype=tf.float32)
     cell = tf.keras.layers.SimpleRNNCell(
         35,
+        dtype="float32",
         activation=binary_straight_through,
         use_bias=False,
         kernel_initializer=tf.keras.initializers.Constant(0.1),

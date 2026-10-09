@@ -49,7 +49,7 @@ def test_architecture_and_precision_gate_packed_flags(hardware, monkeypatch, arc
     assert actual["use_packed_sm120_external_backward"] == ("auto" if enabled else False)
     assert report["architecture"] == architecture
     assert actual["temporal_gradient_precision"] == temporal
-    assert "use_direct_state_rnn_loop" not in actual
+    assert actual["use_direct_state_rnn_loop"] == (architecture != 61)
 
 
 @pytest.mark.parametrize("batch", [1, 7, 8, 13, 32, 33, None])
@@ -91,6 +91,7 @@ def test_missing_libraries_and_cpu_are_reported(hardware, monkeypatch):
     monkeypatch.setattr(csr, "_gpu_compute_architecture", lambda: None)
     monkeypatch.setattr(csr, "fused_cuda_available", lambda: False)
     monkeypatch.setattr(state, "fused_glif_state_available", lambda: False)
+    monkeypatch.setattr(state, "fused_nest_state_available", lambda: False)
     actual, report = resolve()
     assert not any(actual[key] for key in report["selected"])
     assert report["csr_status"] == "test CSR library"
@@ -130,15 +131,39 @@ def test_accumulator_requires_exact_execution_route(hardware, carry, trainable, 
     assert actual["use_javier_recurrent_vjp"] == enabled
 
 
-def test_no_profile_is_exact_noop():
-    requested = {"use_fused_cuda": False, "hard_reset": True}
+def test_explicit_none_profile_is_exact_noop():
+    requested = {"use_fused_cuda": False, "hard_reset": True, "acceleration_profile": None}
     actual, report = acceleration.resolve_acceleration_options(
         requested, compute_dtype=tf.float32, variable_dtype=tf.float32,
         batch_size=32, basis_width=4,
     )
-    assert actual == requested
+    assert actual == {"use_fused_cuda": False, "hard_reset": True}
     assert actual is not requested
     assert report is None
+
+
+def test_omitted_profile_selects_automatic_execution(hardware):
+    actual, report = acceleration.resolve_acceleration_options(
+        {}, compute_dtype=tf.float16, variable_dtype=tf.float32,
+        batch_size=32, basis_width=4,
+    )
+    assert report["profile"] == "auto"
+    assert actual["use_direct_state_rnn_loop"] is True
+    assert actual["use_fused_recurrent_accumulation"] is True
+
+
+def test_direct_cell_auto_keeps_canonical_tape_gradients(hardware):
+    actual, report = resolve(canonical_gradient_boundary=False)
+    assert actual["use_direct_csr_recurrent_gradient"] is False
+    assert actual["use_fused_recurrent_accumulation"] is False
+    assert actual["use_javier_recurrent_vjp"] is False
+    assert "canonical-gradient boundary" in report["reasons"]["use_direct_csr_recurrent_gradient"]
+
+
+def test_auto_rechecks_mutable_type_coefficients(hardware):
+    actual, _ = resolve()
+    assert actual["use_type_indexed_nest_coefficients"] is True
+    assert actual["use_static_type_indexed_nest_dispatch"] is False
 
 
 def test_standalone_per_type_default_does_not_admit_per_edge_accumulator(hardware):

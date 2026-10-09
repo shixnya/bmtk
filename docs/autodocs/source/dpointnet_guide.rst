@@ -72,13 +72,18 @@ Add to the otherwise unchanged simulation configuration:
     }
   }
 
-For eligible direct-loop BPTT, explicitly select
-``use_direct_state_rnn_loop=true`` as well. Native recurrent accumulation
+Automatic selection enables eligible direct-loop BPTT. Native recurrent accumulation
 requires direct CSR, four bases and trainable per-edge weights; retain
 per-type training if that is your scientific recipe. Inspect
 ``rnn.acceleration_report`` and qualify actual updates, checkpoint restoration
 and memory on the intended GPU. Explicit individual flags override the profile.
-External runners must wire the resolver and their independent input surfaces.
+Direct ``GLIF3Cell`` construction also resolves the automatic profile.
+Ordinary direct-cell tapes and inference-only RNNs retain canonical weight
+gradients. Automatic CSR-layout gradients/native carriers require the training
+engine or FP32-temporal runner that restores canonical order. Automatic NEST
+type-indexed dispatch rechecks live coefficient identity; static dispatch
+requires explicit opt-in and immutable coefficient identity.
+External independent producers/carriers must wire their own input surfaces.
 
 Automatic selection chooses qualified paths using actual GPU capability,
 loaded operators, precision, topology and batch, not CUDA version alone.
@@ -96,16 +101,37 @@ and immutable experiment pins. See
 GLIF dynamics and explicit state
 -------------------------------
 
-``GLIF3Cell`` defaults to ``dynamics_mode="legacy"`` to preserve existing
-trajectories and checkpoints. Legacy remains the throughput-oriented starting
-point. NEST is currently an opt-in compatibility mode for NEST-aligned dynamics
-and validation, not a change to the default or a performance optimization.
+``GLIF3Cell`` now defaults to ``dynamics_mode="nest"``. Explicit legacy dynamics
+remains supported. This intentionally changes omitted-field behavior, not pinned
+experiments. See the training standards below for preserving older configurations.
+
+Training standards and migration
+-------------------------------
+
+The standard GLIF RNN uses mixed FP16 compute, selective FP32 voltage/ASC,
+ordinary compute-precision temporal gradients, checkpointed BPTT and automatic
+acceleration. Batch size, sequence length and scientific objectives remain explicit.
+Precision switches live under ``run.precision``:
+``mixed_precision=true``, ``fp32_voltage_and_asc=true`` and
+``fp32_temporal_gradients=false``.
+
+The standard gradient controls are ``spike_surrogate_gain``,
+``recurrent_spike_gradient_scale`` and ``voltage_state_gradient_scale``.
+Legacy names remain accepted; old voltage dampening is the fraction removed,
+whereas the new voltage scale is the fraction retained. The surrogate is selected
+with ``spike_surrogate="gaussian"`` and ``spike_surrogate_width=0.28``.
+
+Repository examples explicitly preserve changed scientific defaults while
+enabling compatible acceleration. See
+:download:`the complete standards and migration tables <../../dpointnet_training_standards.md>`
+for default values, aliases, precision combinations and qualification boundaries.
 
 .. warning::
 
-  **NEST training is experimental and is not recommended for use.** Use
-  ``dynamics_mode="legacy"`` for training, including reproduction of the V1
-  paper protocol. Canonical 75-epoch V1 runs with soft-reset NEST failed to fit
+  **NEST training convergence remains unqualified.** The new starting default
+  does not establish reproduction of the V1 paper protocol. Select
+  ``dynamics_mode="legacy"`` explicitly for historical legacy reproduction.
+  Earlier 75-epoch V1 runs with soft-reset NEST failed to fit
   excitatory firing rates. Matched early-training controls reproduce this
   suppression with both TensorFlow and fused NEST state updates, while legacy
   controls improve. Soft reset, passing gradient/replay tests and faster
@@ -118,7 +144,7 @@ and validation, not a change to the default or a performance optimization.
   observables. NEST training remains available for controlled method research;
   its presence in the API is not an endorsement for scientific training runs.
 
-Set ``dynamics_mode="nest"`` explicitly to use NEST-compatible refractory timing,
+The default ``dynamics_mode="nest"`` uses NEST-compatible refractory timing,
 time-averaged adaptation current,
 spike-boundary adaptation reset, and exact alpha-current-to-voltage integration.
 In NEST mode, SONATA initial voltage, adaptation state and recurrent/external
@@ -166,10 +192,9 @@ gradients but does not restore the lost path. This safeguard does not claim that
 hard-reset training is mathematically impossible or that soft reset solves all
 long-horizon credit-assignment problems.
 
-Inference-only construction and direct ``GLIF3Cell`` construction retain the
-mode-dependent default: hard reset in NEST and soft reset in legacy. Direct cell
-users writing their own ``GradientTape`` loops must select soft reset explicitly;
-an arbitrary external tape cannot be detected by the RNN training guard.
+Inference-only construction and direct ``GLIF3Cell`` construction now default to
+soft reset. Select ``hard_reset=true`` explicitly for hard-reset NEST evaluation.
+An arbitrary external tape cannot be detected by the RNN training guard.
 
 A prebuilt hard-reset model is rejected for training even if its config dictionary
 is subsequently changed. Build a separate soft-reset training model and transfer
@@ -202,13 +227,13 @@ variables, and int8 or int16 refractory state. For both NEST and legacy state
 dispatch, ``"auto"`` falls back to TensorFlow for unsupported dtype policies
 (such as ``mixed_bfloat16`` or ``float64``), even if the CUDA library is loaded.
 Explicit ``true`` rejects an incompatible policy during cell construction with
-the compute and variable dtypes in the error. ``false`` remains the default and
-retains TensorFlow state updates.
+the compute and variable dtypes in the error. The automatic profile selects
+compatible state updates; explicit ``false`` retains TensorFlow state updates.
 The legacy state kernel is never used for NEST. Fused current projection is independent.
 
 ``use_fused_nest_event_vjp=true`` optionally moves NEST's existing attached-reset
 and attached-ASC event-adjoint arithmetic into the NEST backward kernel. It
-defaults to ``false`` and requires ``dynamics_mode="nest"``, enabled fused state,
+is automatically selected for a compatible NEST state route and requires ``dynamics_mode="nest"``, enabled fused state,
 and a rebuilt library containing ``DpointnetNestStateBackwardEvents``. Explicit
 unsupported requests raise an error rather than silently changing the derivative.
 The old backward ABI and default path remain available. This changes neither
@@ -333,12 +358,12 @@ The build targets compute capabilities 7.0, 7.5, 8.0, 8.6, 8.9, 9.0, and 12.0 by
 
 The operator requires exactly one visible GPU. Set ``use_fused_cuda`` to ``true`` in ``rnn_cell_params`` to
 require the operator, or to ``"auto"`` to use it when available and otherwise fall back to TensorFlow. The
-default is ``false``. Rebuild the operator after changing TensorFlow or CUDA installations or after updating
+automatic profile selects compatible operators. Rebuild after changing TensorFlow or CUDA installations or after updating
 BMTK custom-op source; SavedModel graphs containing an older custom-op signature must also be regenerated.
 
 Recurrent backward-kernel selection is controlled separately by ``use_pair_projection``:
 
-* ``"auto"`` (default) selects the pair-projected kernel when fused CUDA is active, the configured batch size
+* With profile expansion disabled, ``"auto"`` selects the pair-projected kernel when fused CUDA is active, the configured batch size
   is 32, and the synaptic basis has four columns. Other configurations use the general fused backward kernel.
 * ``true`` explicitly enables pair projection for any positive configured batch size and basis width with
   fused CUDA. Shapes outside the batch-32 specialization use a general projection kernel and the general
@@ -532,13 +557,13 @@ of every input HDF5 attribute, group structure, or index dataset.
 Set ``use_fixed4_input_forward=true`` to select a fixed-four gather forward for input populations with exactly
 four incoming edges per postsynaptic neuron. One thread owns each ``(batch, post)`` output and writes all four
 basis values without scatter atomics. Selection is derived from connectivity structure rather than population
-name; nonqualifying populations retain grouped/general forwarding. The default is ``false`` to preserve prior
-mixed-precision summation semantics. Backward continues to use the source-CSR path, preserving canonical
+name; nonqualifying populations retain grouped/general forwarding. The automatic profile enables eligible
+four-basis routes. Backward continues to use the source-CSR path, preserving canonical
 trainable-weight gradients and the no-activity-gradient contract.
 
 Set ``use_fused_current_accumulation=true`` to thread recurrent and fused spike-input currents through one
 additive CUDA buffer instead of materializing each source and combining them with a separate ``AddN``. The
-option defaults to ``false`` and requires fused CUDA currents. Its custom gradient passes the upstream current
+automatic profile enables it for compatible batch32/four-basis fused currents. Its custom gradient passes the upstream current
 gradient unchanged through the accumulator while retaining independent canonical gradients for every trainable
 weight surface. Current-type or otherwise non-fused inputs retain the existing TensorFlow addition path.
 
@@ -549,9 +574,9 @@ These measurements are hardware- and topology-dependent; benchmark representativ
 pair kernel. Small-batch specializations were tested but regressed the complete networks, so ``"auto"`` does not
 select pair projection below batch 32.
 
-The optional ``use_fused_state`` cell parameter fuses the GLIF membrane,
-refractory, ASC, PSC, spike, and delayed-history transition. It is ``false`` by
-default. ``"auto"`` selects it only when the CUDA library is available, the
+The ``use_fused_state`` cell parameter fuses the GLIF membrane,
+refractory, ASC, PSC, spike, and delayed-history transition. The automatic profile
+selects it when compatible. Explicit ``"auto"`` selects it only when the CUDA library is available, the
 synaptic basis has four columns, and the dtype policy is supported;
 ``true`` requires those conditions and otherwise raises a configuration error.
 Both surrogate shapes support fused execution. Soft reset avoids
@@ -561,11 +586,11 @@ supported and tested.
 Selective state precision and event credit
 -----------------------------------------
 
-The opt-in ``rnn_cell_params.state_precision="selective"`` policy requires
+The standard mixed-FP16 ``rnn_cell_params.state_precision="selective"`` policy requires
 ``mixed_float16`` (FP16 projection computation with FP32 master variables).
-The default ``"compute"`` retains homogeneous floating state, historical legacy
-ASC rate/logit/sigmoid rounding, and FP16-rounded NEST arithmetic. It does not
-silently adopt the new policy.
+Explicit ``"compute"`` retains homogeneous floating state, historical legacy
+ASC rate/logit/sigmoid rounding, and FP16-rounded NEST arithmetic.
+Non-mixed-FP16 policies default to ``"compute"``.
 
 Selective precision stores voltage and both ASC components in FP32, with all
 derived neuron/synapse coefficients computed from float64 host inputs before
@@ -1176,27 +1201,27 @@ the `GLIF point-neuron models <https://brain-map.org/our-research/computational-
                 * - option
                   - description
                   - default
-                * - gauss_std
-                  - Positive finite Gaussian surrogate width (not a normalized density standard deviation).
-                  - 0.5
-                * - dampening_factor
-                  - Scale applied to the spike surrogate derivative.
-                  - 0.3
-                * - recurrent_dampening_factor
-                  - Retained recurrent temporal-gradient multiplier. ``0.0`` blocks this gradient and ``1.0`` leaves it undampened.
-                  - 0.5
-                * - voltage_gradient_dampening
-                  - Fraction removed from the membrane-voltage self-loop gradient: ``0`` retains it and ``1`` blocks it. Synaptic-current gradients are not scaled.
-                  - 0.5
+                * - spike_surrogate_width
+                  - Positive finite Gaussian surrogate width. Legacy alias: ``gauss_std``.
+                  - 0.28
+                * - spike_surrogate_gain
+                  - Scale applied to the spike surrogate derivative. Legacy alias: ``dampening_factor``.
+                  - 0.05
+                * - recurrent_spike_gradient_scale
+                  - Retained recurrent temporal-gradient multiplier. Legacy alias: ``recurrent_dampening_factor``.
+                  - 1.0
+                * - voltage_state_gradient_scale
+                  - Retained membrane-voltage self-loop gradient. Legacy alias ``voltage_gradient_dampening`` uses the complementary removed fraction.
+                  - 1.0
                 * - detach_reset
                   - Stop only the spike-to-voltage-reset gradient. Forward reset is unchanged.
                   - True
                 * - detach_asc_reset
                   - Stop only the spike-to-ASC-event gradient. Continuous ASC gradients are unchanged.
-                  - True
+                  - False
                 * - state_precision
-                  - ``"compute"`` preserves homogeneous floating state; opt-in ``"selective"`` uses FP32 voltage/ASC/coefficients and FP16 synaptic storage under mixed_float16.
-                  - "compute"
+                  - ``"selective"`` uses FP32 voltage/ASC/coefficients and FP16 synaptic storage under mixed_float16; ``"compute"`` preserves homogeneous floating state.
+                  - Selective under mixed_float16; compute otherwise
                 * - temporal_gradient_precision
                   - ``"float32"`` selects the custom FP32 temporal reverse/replay path with selective forward storage. Direct cell tapes are unsupported.
                   - "compute"
@@ -1204,8 +1229,8 @@ the `GLIF point-neuron models <https://brain-map.org/our-research/computational-
                   - Maximum replay chunk length for the FP32 temporal policy.
                   - 25
                 * - use_fused_recurrent_accumulation
-                  - Opt-in producer/temporal-accumulator fusion for trainable per-edge recurrent weights with FP32 temporal carry, batch32/four bases, direct CSR, uint32 pairs and rebuilt SM86+ CUDA. Unsupported explicit requests raise.
-                  - False
+                  - Producer/temporal-accumulator fusion for qualified per-edge/direct-loop or FP32 replay routes, batch1..32/four bases and nonempty uint32 pairs. Unsupported explicit requests raise.
+                  - Automatically qualified
                 * - current_replay_mode
                   - Omitted/null resolves to ``"record"`` for FP32 temporal carry and inactive (None) for compute carry. Explicit ``"record"`` and approximate ``"recompute"`` both require the FP32 temporal runner; neither changes precision.
                   - None
@@ -1221,24 +1246,24 @@ the `GLIF point-neuron models <https://brain-map.org/our-research/computational-
                 * - max_delay
                   - 
                   - 5
-                * - pseudo_gauss
-                  - 
-                  - False
+                * - spike_surrogate
+                  - ``"gaussian"`` or ``"triangular"``. Legacy ``pseudo_gauss`` maps true to Gaussian and false to triangular.
+                  - "gaussian"
                 * - dynamics_mode
-                  - Select ``"legacy"`` for recommended training or ``"nest"`` for separately validated compatibility inference/evaluation. NEST training is experimental and is not recommended for use. NEST changes timing, integration, delays, state, and timestamps.
-                  - "legacy"
+                  - NEST changes timing, integration, delays, state and timestamps. Its default status is not convergence qualification; explicit legacy reproduction remains supported.
+                  - "nest"
                 * - train_recurrent
                   - 
                   - True
                 * - train_recurrent_per_type
                   - 
-                  - True
+                  - False
                 * - noise_seed
                   - 
                   - 0
                 * - hard_reset
-                  - Reset voltage to ``V_reset`` after a spike when true; use subtractive soft reset when false. Training resolves omitted or null to ``False`` and rejects explicit ``True``. Inference-only and direct-cell defaults are ``False`` in legacy and ``True`` in NEST; existing models retain their built reset setting.
-                  - False for training; otherwise mode-dependent
+                  - Reset to ``V_reset`` when true; use subtractive soft reset when false. Training rejects explicit true. Explicit null on a direct/inference-only cell retains mode-dependent resolution.
+                  - False
                 * - tau_basis
                   - 
                   - <None>
@@ -1247,10 +1272,10 @@ the `GLIF point-neuron models <https://brain-map.org/our-research/computational-
                   - <None>
                 * - use_fused_cuda
                   - Use the optional fused CUDA synaptic-current operator. ``True`` requires it; ``"auto"`` falls back to TensorFlow when unavailable.
-                  - False
+                  - Automatically qualified
                 * - use_pair_projection
                   - Select the recurrent CUDA backward kernel. ``"auto"`` uses pair projection for batch 32 with four basis columns; ``True`` requires it; ``False`` forces the general kernel.
-                  - "auto"
+                  - Automatically qualified; "auto" without profile expansion
                 * - use_packed_sm120_backward
                   - Select the packed recurrent backward on SM86 or newer. ``True`` requires float16, batch 32, four basis columns, ``uint32`` compact-pair metadata, and qualified hardware; ``False`` retains the prior pair kernel.
                   - "auto"
@@ -1259,28 +1284,28 @@ the `GLIF point-neuron models <https://brain-map.org/our-research/computational-
                   - "auto"
                 * - use_fixed4_input_forward
                   - Use the one-owner input forward for populations with exactly four incoming edges per postsynaptic neuron. Nonqualifying populations retain grouped/general forwarding.
-                  - False
+                  - Automatically qualified
                 * - use_fused_current_accumulation
                   - Accumulate recurrent and fused spike-input currents through one additive CUDA buffer. Requires fused CUDA currents; current-type inputs retain the TensorFlow addition path.
-                  - False
+                  - Automatically qualified
                 * - use_direct_csr_recurrent_gradient
                   - Accumulate recurrent gradients in CSR order and restore master-variable order at the full or segmented BPTT boundary. Requires individually trainable recurrent edges and fused CUDA; packed kernels are optional.
-                  - False
+                  - Automatically qualified
                 * - use_small_batch_recurrent_backward
                   - Experimental local batch reduction for batch sizes 1 through 8 with fused CUDA; independent of pair projection and gradient layout.
                   - False
                 * - use_active_row_forward
                   - Opt into active-source-row forwarding for batch sizes 1 through 32 with four basis columns and fused CUDA. Does not pad or change the training batch.
-                  - False
+                  - Automatically qualified
                 * - track_voltage_penalty
-                  - Accumulate a compact neuron-mean voltage penalty at each timestep. Enable only with an online ``VoltageRegularization`` loss.
-                  - False
+                  - Accumulate a compact neuron-mean voltage penalty at each timestep. Tracking does not automatically install a loss.
+                  - True
                 * - voltage_penalty_mode
                   - Compact voltage penalty: ``"range"`` penalizes voltages outside the normalized range [0, 1], while ``"threshold"`` penalizes distance from threshold.
                   - "range"
                 * - return_voltage_sequences
                   - Return neuron-resolved voltage sequences. Setting this to ``False`` requires ``track_voltage_penalty=True``.
-                  - True
+                  - False
 
 
 Setting the Network Model
@@ -1491,9 +1516,10 @@ Training Options
 Training hyper-parameters
 -------------------------
 
-The default training path remains full-sequence BPTT with neuron-resolved voltage
-outputs. The performance and memory options below are conservative so existing
-configurations retain their previous behavior:
+The default training path uses segmented exact BPTT with compact spike/voltage-
+penalty outputs. Checkpointing does not truncate temporal credit. Explicitly
+request neuron-resolved voltages when required, and migrate historical
+configurations rather than assuming omitted settings retain previous behavior:
 
 .. list-table:: Training and output options
    :header-rows: 1
@@ -1502,7 +1528,7 @@ configurations retain their previous behavior:
      - default
      - description
    * - ``gradient_checkpointing``
-     - ``False``
+     - ``True``
      - Enable segmented exact BPTT recomputation.
    * - ``gradient_checkpoint_chunk_size``
      - ``25``
@@ -1577,9 +1603,11 @@ and timestep:
 
 The cell and loss ``penalty_mode`` values must match. Online mode supports
 ``"range"`` and ``"threshold"`` penalties and does not support a core mask.
-The defaults are ``online=False``, ``track_voltage_penalty=False``, and
-``return_voltage_sequences=True``. Keep those defaults when another consumer,
-including a local learning rule, requires full voltages.
+The loss default remains ``online=False``; cell defaults are now
+``track_voltage_penalty=True`` and ``return_voltage_sequences=False``.
+Explicitly request full voltages when another consumer or loss, including a
+local learning rule, requires them. The high-level training loss adapter routes
+eligible voltage regularization through the compact penalty.
 
 Callbacks
 ---------
@@ -1874,7 +1902,8 @@ The native training engine supports this loss with
 The explicit ``"recompute"`` mode reprojects currents and remains approximate
 when atomic current reductions are nondeterministic. Both modes carry the
 online accumulator through the FP32 temporal adjoint; optional
-``use_fused_recurrent_accumulation`` remains independent and default-false.
+``use_fused_recurrent_accumulation`` remains independently overridable and is
+selected only for qualified routes by the automatic profile.
 Only per-chunk spike-output cotangents are widened, not the full compact
 sequence. Fused NEST capture preserves the selected Gaussian/triangular
 surrogate and reset/ASC derivative settings.

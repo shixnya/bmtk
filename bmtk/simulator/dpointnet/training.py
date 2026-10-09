@@ -140,7 +140,7 @@ class TrainingEngine:
         self._training_fnc = None
         self._learning_rule = BPTTLearningRule()
 
-        self.gradient_checkpointing = kwargs.get("gradient_checkpointing", False)
+        self.gradient_checkpointing = kwargs.get("gradient_checkpointing", True)
         self.gradient_checkpoint_chunk_size = int(
             kwargs.get("gradient_checkpoint_chunk_size", 25)
         )

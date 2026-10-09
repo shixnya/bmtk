@@ -2,9 +2,10 @@
 
 ## Scope
 
-This guide describes the recommended automatic acceleration workflow for new
-projects and explicit precision settings. Library defaults favor compatibility;
-an accelerated profile must
+This guide describes automatic acceleration and explicit precision settings.
+See [training standards and migration](dpointnet_training_standards.md) for the
+new omitted-setting defaults, precision switches and legacy aliases.
+An accelerated profile must
 match the selected hardware, topology, precision and training objective.
 
 For batches below 32, follow the [variable-batch guide](dpointnet_variable_batch.md)
@@ -15,9 +16,9 @@ Javier-derived kernels, grouped EMD and optimizer work retain source attribution
 Javier Galvan's `JavierGalvan9/V1_GLIF_model`, `v1_model_utils` at commit
 `2c52ec10c1eee409ddf900f8a5b8460cf9c46d24`, in their implementation comments.
 
-**Use legacy dynamics for training. NEST training is experimental and is not
-recommended.** Throughput and gradient checks do not establish training
-convergence. NEST is an opt-in compatibility mode requiring separate validation
+**NEST is now the omitted dynamics default; training convergence remains
+experimental.** Throughput and gradient checks do not establish training
+convergence. Explicit legacy dynamics remains supported. NEST requires separate validation
 of the intended network and outputs. Do not silently switch an existing
 experiment's dynamics, precision or random sampler.
 
@@ -26,12 +27,13 @@ experiment's dynamics, precision or random sampler.
 Build both operators for the full supported GPU pool, then use
 `"acceleration_profile": "auto"` rather than maintaining GPU-specific lists of
 accelerator flags. This is the recommended new-project starting point; omitting
-the profile still preserves library defaults and existing experiments.
+the profile now selects automatic acceleration. Preserve scientific settings
+explicitly when migrating an older configuration.
 
-1. Pin the consolidated fork's qualified source, for example
-   `94f90d70e6353af54bf6205708a7e2b75e85a534` on
-   `shixnya/bmtk:feature/dpointnet-training-inputs-consolidated`, in the project's
-   dependency contract. Verify the actual BMTK import path.
+1. Pin a reviewed source revision containing the training-standards migration
+   in the project's dependency contract. Older consolidated revisions do not
+   contain these omitted-setting defaults or precision switches. Verify the
+   actual BMTK import path; a moving branch is not an immutable experiment pin.
 2. In the intended TensorFlow/CUDA environment, check that `nvcc --list-gpu-code`
    supports every requested target and build:
 
@@ -55,14 +57,14 @@ the profile still preserves library defaults and existing experiments.
    }
    ```
 
-   For the eligible direct-loop BPTT route, explicitly select
-   `"use_direct_state_rnn_loop": true` as well. Automatic acceleration does not
-   choose this route, precision or scientific parameter sharing for you.
+   Automatic acceleration also selects the compatible direct-loop BPTT route.
+   It does not override explicit precision or scientific parameter sharing.
    Preserve your per-type/per-edge recipe; recurrent native accumulation
    requires trainable per-edge weights, direct CSR and four bases.
 4. Inspect `rnn.acceleration_report`, including fallback/disabled reasons,
    and smoke-test real optimizer updates, restoration and memory on the
-   intended GPU. External runners must wire the shared resolver and their own
+   intended GPU. Direct `GLIF3Cell` construction also resolves auto. External
+   independent producers/carriers must wire their own
    input/carrier surfaces; setting a cell flag alone cannot control them.
 
 **Initial build cost:** approximately13-14minutes for both full-target operators
@@ -94,8 +96,8 @@ force an unqualified path merely because the fat binary contains its SM target.
 ### Automatic accelerator selection
 
 Set `"acceleration_profile": "auto"` in `rnn_cell_params` to select compatible
-execution accelerators at model build time. Omitting it preserves existing
-defaults. Explicit individual flags take precedence and retain their normal
+execution accelerators at model build time. Omitting it now selects auto;
+explicit null disables profile expansion. Explicit individual flags take precedence and retain their normal
 validation; an unsupported explicit `true` is not silently downgraded.
 
 ```json
@@ -243,7 +245,8 @@ backends or silently enable experimental settings on those projects.
   atomic current projection need not reproduce the original forward exactly.
 
 The existing [training guide](autodocs/source/dpointnet_guide.rst) describes general
-APIs. Most accelerators are opt-in constructor flags. ExpAdam defaults
+APIs. Omitted accelerator settings are now selected by the automatic profile;
+explicit flags remain supported. ExpAdam defaults
 to `jit_compile=true` on its eligible path; set it explicitly and validate XLA
 availability on a new environment.
 
@@ -252,8 +255,8 @@ availability on a new environment.
 [dpointnet_parity_overlay.json](dpointnet_parity_overlay.json) is a **partial config**:
 it contains no data paths, input definitions or targets. It records a specific
 NEST throughput benchmark, **not a recommended NEST training recipe**. Do not
-merge it unchanged into a new training experiment. Select legacy dynamics and
-your own scientific settings, then apply compatible acceleration keys to a
+merge it unchanged into a new training experiment. Select your dynamics and
+other scientific settings explicitly, then apply compatible acceleration keys to a
 complete configuration.
 
 Qualifications:
