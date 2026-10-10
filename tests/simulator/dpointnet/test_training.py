@@ -65,14 +65,18 @@ def test_edge_sort_preserves_lexicographic_order_and_ties(indices):
 @pytest.mark.parametrize(
     "reset_options", [{}, {"hard_reset": None}, {"hard_reset": False}]
 )
-def test_training_resolves_soft_reset_without_changing_inference_params(
+def test_training_resolves_reset_without_changing_inference_params(
     mode, reset_options
 ):
     rnn = RNN(cell_params={"dynamics_mode": mode, **reset_options})
     original = dict(rnn.cell_params)
 
-    assert rnn._resolve_cell_params(training=True)["hard_reset"] is False
-    assert rnn._resolve_cell_params(training=False) == original
+    expected_hard = mode == "nest" and not reset_options
+    for training_mode in (True, False):
+        resolved = rnn._resolve_cell_params(training=training_mode)
+        null_inference = mode == "nest" and reset_options == {"hard_reset": None} and not training_mode
+        assert resolved["hard_reset"] is (expected_hard or null_inference)
+        assert resolved["hard_reset_gradient_mode"] == ("soft_surrogate" if expected_hard else "exact")
     assert rnn.cell_params == original
 
 
@@ -127,7 +131,7 @@ def test_training_entry_points_reject_hard_reset(entry_point, prebuilt):
 
 
 def test_training_prepares_unbuilt_model_without_mutating_config(monkeypatch):
-    rnn = RNN(cell_params={"dynamics_mode": "nest"})
+    rnn = RNN(cell_params={"dynamics_mode": "nest", "hard_reset": False})
     original = dict(rnn.cell_params)
     build_calls = []
 
@@ -925,7 +929,7 @@ def test_rnn_wraps_float16_optimizer_with_loss_scaling():
         def train(self):
             self.trained = True
 
-    rnn = RNN()
+    rnn = RNN(cell_params={"hard_reset": False})
     rnn._model_built = True
     rnn._cell = SimpleNamespace(_hard_reset=False)
     rnn.extractor_model = object()

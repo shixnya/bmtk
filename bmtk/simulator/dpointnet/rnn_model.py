@@ -344,21 +344,50 @@ class RNN:
 
     def _resolve_cell_params(self, training=False, check_built=True):
         cell_params = {} if self.cell_params is None else dict(self.cell_params)
+        if issubclass(self.cell_cls, GLIF3Cell):
+            from ._options import UNSET
+            from .cell_models.nest_dynamics import resolve_hard_reset_options
+
+            hard_reset, mode = resolve_hard_reset_options(
+                cell_params.get("hard_reset", UNSET),
+                cell_params.get("hard_reset_gradient_mode", UNSET),
+                dynamics_mode=cell_params.get("dynamics_mode", "nest"),
+                training=training,
+            )
+            cell_params.update(hard_reset=hard_reset, hard_reset_gradient_mode=mode)
         if training and issubclass(self.cell_cls, GLIF3Cell):
-            if cell_params.get("hard_reset"):
+            surrogate = cell_params.get("hard_reset_gradient_mode", "exact") == "soft_surrogate"
+            if surrogate:
+                from .cell_models.nest_dynamics import validate_hard_reset_gradient_mode
+
+                validate_hard_reset_gradient_mode(
+                    "soft_surrogate", hard_reset=cell_params.get("hard_reset"),
+                    dynamics_mode=cell_params.get("dynamics_mode", "nest"),
+                )
+            if cell_params.get("hard_reset") and not surrogate:
                 raise ValueError(
                     "GLIF training requires hard_reset=False. Hard reset blocks the "
                     "voltage-state gradient at spikes and during refractory clamping; "
                     "the spike surrogate does not restore that path. Set "
-                    "rnn_cell_params.hard_reset=False or omit it for training."
+                    "rnn_cell_params.hard_reset=False for soft-reset training, "
+                    "or explicitly opt into hard_reset_gradient_mode='soft_surrogate'."
                 )
-            if check_built and self._model_built and self._cell._hard_reset:
+            if check_built and self._model_built and surrogate and not self._cell._hard_reset:
+                raise ValueError(
+                    "Cannot enable hard-reset surrogate training on a model already "
+                    "built with soft reset; rebuild explicitly before training."
+                )
+            if check_built and self._model_built and self._cell._hard_reset and (
+                not surrogate
+                or getattr(self._cell, "hard_reset_gradient_mode", "exact") != "soft_surrogate"
+            ):
                 raise ValueError(
                     "Cannot train a model already built with hard reset. Build a "
                     "separate soft-reset training model and transfer weights explicitly; "
                     "changing cell_params does not change an existing traced graph."
                 )
-            cell_params["hard_reset"] = False
+            if not surrogate:
+                cell_params["hard_reset"] = False
         return cell_params
 
     def _prepare_training_model(self):

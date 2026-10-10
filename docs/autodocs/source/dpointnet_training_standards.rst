@@ -25,8 +25,9 @@ settings override them; targets and the training protocol are chosen separately.
      - Default
      - What it means
    * - Dynamics / reset
-     - ``nest`` / soft
-     - DPointNet's NEST-compatible dynamics in TensorFlow; training uses subtractive reset.
+     - ``nest`` / hard forward, soft-surrogate backward
+     - Hard voltage reset and refractory clamping in training and inference;
+       approximate derivatives retain voltage credit during learning.
    * - Spike derivative
      - Gaussian, width ``0.28``, gain ``0.05``
      - Smooth derivative used for learning, not a different forward spike threshold.
@@ -65,6 +66,55 @@ Choose batch size, sequence length, seed, optimizer, learning rate, epochs,
 condition layout, targets and loss coefficients for your experiment.
 Visual-cortex (V1) recipe values are not automatically imposed on other models.
 No activity-rescue loss is enabled automatically.
+
+Reset defaults and compatibility
+--------------------------------
+
+When both reset options are omitted, NEST GLIF cells and high-level RNNs resolve
+to ``hard_reset=true`` and ``hard_reset_gradient_mode="soft_surrogate"``.
+This is an intentional forward-dynamics change for new configurations.
+The forward trajectory is hard even during training; the learning derivative
+is approximate, not the exact derivative of the discrete hard-reset map.
+
+Explicit historical configurations remain authoritative:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 55
+
+   * - Request
+     - Resolution
+   * - Omit both options with NEST dynamics
+     - Hard forward / soft-surrogate backward
+   * - ``hard_reset=false``
+     - Soft forward / existing exact reset derivatives
+   * - Historical ``hard_reset=null``
+     - Preserve soft reset for high-level training and exact hard NEST reset for inference/direct cells;
+       prefer an explicit Boolean for new scientific configs
+   * - ``hard_reset=true`` with mode omitted
+     - Hard forward / historical exact clamp derivatives; high-level BPTT rejects it
+   * - ``hard_reset=true``, ``hard_reset_gradient_mode="soft_surrogate"``
+     - Trainable hard-forward NEST configuration
+   * - Explicit ``dynamics_mode="legacy"`` with reset omitted
+     - Existing soft reset and exact derivatives
+
+The explicit reset fragment is recommended when sharing a scientific configuration
+so it does not depend on future defaults:
+
+.. code-block:: json
+
+   {
+     "rnn_cell_params": {
+       "dynamics_mode": "nest",
+       "hard_reset": true,
+       "hard_reset_gradient_mode": "soft_surrogate"
+     }
+   }
+
+Keep ``detach_reset=true`` and ``detach_asc_reset=false`` unless deliberately
+studying a different event derivative. Reset selection does not add a voltage
+loss or bound all voltage excursions. Existing pinned jobs and checkpoints must
+retain their declared source, reset, precision and derivative settings.
 
 .. _dpointnet_training_standards--precision-switches:
 

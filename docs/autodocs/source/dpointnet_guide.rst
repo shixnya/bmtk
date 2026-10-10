@@ -222,9 +222,14 @@ Explicit ``"legacy"`` remains available
 for reproducing an older model. Changing dynamics changes the simulated
 trajectory; it is not just a speed setting.
 
-Training uses a **soft reset**, subtracting the spike-reset amount rather than
-forcing voltage to the reset value. Explicit ``hard_reset=true`` is rejected
-for training. Simulation of learned weights should retain the training
+New NEST GLIF configurations use **hard reset forward, soft-surrogate backward**.
+Voltage resets and refractory clamps stay hard during both training and inference;
+the approximate learning derivative retains continuous voltage credit.
+See :doc:`dpointnet_hard_reset_training` for the rule and its limitations.
+Explicit ``hard_reset=false`` retains soft reset. Explicit ``hard_reset=true``
+without a gradient mode retains the historical exact-clamp derivative; for
+hard-forward training set ``hard_reset_gradient_mode="soft_surrogate"``.
+Simulation of learned weights should retain the training
 reset policy. To study hard-reset dynamics, build a separate inference-only
 model with that setting and assess the changed behavior.
 
@@ -259,6 +264,7 @@ Next steps
    dpointnet_training
    dpointnet_custom_training
    dpointnet_training_standards
+   dpointnet_hard_reset_training
 
 .. toctree::
    :maxdepth: 1

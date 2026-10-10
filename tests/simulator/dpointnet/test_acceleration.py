@@ -19,6 +19,7 @@ def hardware(monkeypatch):
     monkeypatch.setattr(state, "glif_state_op_status", lambda: "test state library")
     for name in (
         "fused_glif_state_available", "fused_nest_state_available",
+        "fused_pascal_nest_launch_available",
         "fused_nest_type_indexed_coefficients_available",
     ):
         monkeypatch.setattr(state, name, lambda: True)
@@ -49,7 +50,7 @@ def test_architecture_and_precision_gate_packed_flags(hardware, monkeypatch, arc
     assert actual["use_packed_sm120_external_backward"] == ("auto" if enabled else False)
     assert report["architecture"] == architecture
     assert actual["temporal_gradient_precision"] == temporal
-    assert actual["use_direct_state_rnn_loop"] == (architecture != 61)
+    assert actual["use_direct_state_rnn_loop"] is True
 
 
 @pytest.mark.parametrize("batch", [1, 7, 8, 13, 32, 33, None])
@@ -76,14 +77,39 @@ def test_numeric_policy_not_changed(hardware, dtype, masters):
     assert actual["use_packed_sm120_backward"] == ("auto" if dtype == tf.float16 else False)
 
 
-def test_pascal_nest_not_silently_promoted(hardware, monkeypatch):
-    csr, _ = hardware
+@pytest.mark.parametrize("safe_binary", [False, True])
+def test_pascal_nest_requires_occupancy_aware_state_binary(hardware, monkeypatch, safe_binary):
+    csr, state = hardware
     monkeypatch.setattr(csr, "_gpu_compute_architecture", lambda: 61)
+    monkeypatch.setattr(state, "fused_pascal_nest_launch_available", lambda: safe_binary)
     actual, report = resolve({"dynamics_mode": "nest"})
     assert actual["dynamics_mode"] == "nest"
-    assert actual["use_fused_cuda"] is False
-    assert actual["use_fused_state"] is False
-    assert "Pascal" in report["reasons"]["use_fused_cuda"]
+    assert actual["use_fused_cuda"] is True
+    assert actual["use_fused_state"] is safe_binary
+    assert actual["use_direct_state_rnn_loop"] is safe_binary
+    assert actual["use_fused_recurrent_accumulation"] is safe_binary
+    assert actual["use_packed_sm120_backward"] is False
+    assert "occupancy" in report["reasons"]["use_fused_state"]
+
+
+@pytest.mark.parametrize("compute_dtype", [tf.float16, tf.float32])
+@pytest.mark.parametrize("temporal", ["compute", "float32"])
+@pytest.mark.parametrize("batch", [1, 8, 16, 32, 33])
+def test_pascal_compatible_accumulator_not_packed_policy(hardware, monkeypatch, compute_dtype, temporal, batch):
+    csr, _ = hardware
+    monkeypatch.setattr(csr, "_gpu_compute_architecture", lambda: 61)
+    actual, _ = resolve(
+        {"temporal_gradient_precision": temporal},
+        compute_dtype=compute_dtype, batch_size=batch,
+    )
+    assert actual["use_fused_cuda"] is True
+    assert actual["use_fused_state"] is True
+    assert actual["use_fused_recurrent_accumulation"] == (batch <= 32)
+    assert actual["use_javier_recurrent_vjp"] == (
+        batch <= 32 and compute_dtype == tf.float16 and temporal == "compute"
+    )
+    assert actual["use_packed_sm120_backward"] is False
+    assert actual["use_packed_sm120_external_backward"] is False
 
 
 def test_missing_libraries_and_cpu_are_reported(hardware, monkeypatch):
@@ -333,7 +359,7 @@ def test_incompatible_explicit_carrier_override_rejected(hardware, monkeypatch):
         resolve({"use_direct_state_rnn_loop": True, "use_javier_recurrent_vjp": True})
 
 
-@pytest.mark.parametrize("architecture", [61, 70, 80])
+@pytest.mark.parametrize("architecture", [70, 80])
 def test_unqualified_architectures_keep_conservative_auto(hardware, monkeypatch, architecture):
     csr, _ = hardware
     monkeypatch.setattr(csr, "_gpu_compute_architecture", lambda: architecture)
@@ -355,11 +381,11 @@ def test_rtx8000_auto_keeps_batch_specific_guards(hardware, monkeypatch, batch):
     assert actual["use_packed_sm120_external_backward"] == ("auto" if batch == 32 else False)
 
 
-def test_explicit_pascal_carrier_requires_opt_in(hardware, monkeypatch):
+def test_pascal_carrier_uses_compatible_automatic_accumulator(hardware, monkeypatch):
     csr, _ = hardware
     monkeypatch.setattr(csr, "_gpu_compute_architecture", lambda: 61)
     options, _ = resolve({"use_direct_state_rnn_loop": True})
-    assert acceleration.resolve_weight_carry_options(options)["resolved"]["native_accumulator"] is False
+    assert acceleration.resolve_weight_carry_options(options)["resolved"]["native_accumulator"] is True
     explicit = {"use_fused_recurrent_accumulation": True, "use_javier_recurrent_vjp": True}
     assert acceleration.resolve_weight_carry_options(explicit)["resolved"]["native_accumulator"] is True
 

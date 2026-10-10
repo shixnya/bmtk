@@ -357,6 +357,7 @@ def make_cell(
 def test_rnn_build_resolves_reset_for_training_and_inference(build_mode, mode):
     from bmtk.simulator.dpointnet.rnn_model import RNN
 
+    policy = tf.keras.mixed_precision.global_policy()
     network, inputs = make_network_inputs()
     rnn = RNN(
         seq_len=4,
@@ -377,17 +378,17 @@ def test_rnn_build_resolves_reset_for_training_and_inference(build_mode, mode):
             rnn.build(training=True)
         else:
             rnn.build()
-        expected_hard_reset = False
+        expected_hard_reset = mode == "nest"
         assert rnn.cell._hard_reset is expected_hard_reset
         assert "hard_reset" not in rnn.cell_params
-        if expected_hard_reset:
-            with pytest.raises(ValueError, match="already built with hard reset"):
-                rnn._prepare_training_model()
-        else:
-            rnn._prepare_training_model()
-            assert rnn.cell._hard_reset is False
+        rnn._prepare_training_model()
+        assert rnn.cell._hard_reset is expected_hard_reset
+        assert rnn.cell.hard_reset_gradient_mode == (
+            "soft_surrogate" if expected_hard_reset else "exact"
+        )
     finally:
         rnn.cleanup()
+        tf.keras.mixed_precision.set_global_policy(policy)
 
 
 def test_default_dynamics_mode_selects_nest_and_explicit_null_reset():

@@ -76,6 +76,18 @@ def test_rnn_and_training_omitted_defaults():
     assert engine.gradient_checkpoint_chunk_size == 25
     assert rnn.batch_size == 2
     assert rnn.seq_len == 5
+    assert rnn._resolve_cell_params(training=True)["hard_reset"] is True
+    assert rnn._resolve_cell_params(training=True)["hard_reset_gradient_mode"] == "soft_surrogate"
+
+
+def test_direct_cell_omitted_reset_matches_rnn_default():
+    network, inputs, args = make_cell(mode="nest", return_spec=True)
+    args.pop("hard_reset", None)
+    args.pop("hard_reset_gradient_mode", None)
+    args["acceleration_profile"] = None
+    cell = GLIF3Cell(network, inputs, **args)
+    assert cell._hard_reset is True
+    assert cell.hard_reset_gradient_mode == "soft_surrogate"
 
 
 def test_renamed_aliases_reject_ambiguous_configurations():

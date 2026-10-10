@@ -161,8 +161,9 @@ On clusters, follow the site's rules for compilation and compute allocations.
 
    A successful multi-architecture build is not a test of every device.
    Check the actual model, inputs, precision, updates, restoration and memory
-   on each new GPU family. General NEST/Pascal and physical multi-GPU execution
-   are not established by the build.
+   on each new GPU family. Pascal automatic routing requires the repaired,
+   capability-marked state operators described in :doc:`dpointnet_pascal`;
+   physical multi-GPU execution is not established by the build.
 
 Measure an improvement
 ----------------------

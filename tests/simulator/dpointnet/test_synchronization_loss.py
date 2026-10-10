@@ -225,12 +225,14 @@ def test_synchronization_loss_matches_loop_reference_value_and_gradient(monkeypa
         selected_spikes = tf.stack(samples)
         reference_fanos = []
         for bin_size in reference_loss._bin_sizes_ms:
-            counts = tf.nn.conv1d(
-                selected_spikes[..., None],
-                tf.ones((bin_size, 1, 1), dtype=tf.float32),
-                stride=bin_size,
-                padding="VALID",
-            )[..., 0]
+            # Keep the independent convolution oracle usable with cuDNN on Pascal.
+            with tf.device("/CPU:0"):
+                counts = tf.nn.conv1d(
+                    selected_spikes[..., None],
+                    tf.ones((bin_size, 1, 1), dtype=tf.float32),
+                    stride=bin_size,
+                    padding="VALID",
+                )[..., 0]
             mean_count = tf.maximum(
                 tf.reduce_mean(counts, axis=1), tf.constant(1e-7, tf.float32)
             )

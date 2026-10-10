@@ -707,7 +707,7 @@ class GLIF3Cell(tf.keras.layers.Layer):
         # train_input=False,
         # train_noise=True,
         noise_seed=0,
-        hard_reset=False,
+        hard_reset=UNSET,
         tau_basis=None,
         synaptic_basis_weights=None,
         use_fused_cuda=UNSET,
@@ -754,6 +754,7 @@ class GLIF3Cell(tf.keras.layers.Layer):
         spike_surrogate_gain=UNSET,
         recurrent_spike_gradient_scale=UNSET,
         voltage_state_gradient_scale=UNSET,
+        hard_reset_gradient_mode=UNSET,
         acceleration_profile="auto",
         _canonical_gradient_boundary=False,
     ):
@@ -763,6 +764,18 @@ class GLIF3Cell(tf.keras.layers.Layer):
         }
         super().__init__()
         validate_bool_option(_canonical_gradient_boundary, "_canonical_gradient_boundary")
+        from .nest_dynamics import resolve_hard_reset_options
+
+        hard_reset, hard_reset_gradient_mode = resolve_hard_reset_options(
+            hard_reset, hard_reset_gradient_mode, dynamics_mode=dynamics_mode
+        )
+        self.hard_reset_gradient_mode = hard_reset_gradient_mode
+        if hard_reset_gradient_mode == "soft_surrogate":
+            io.log_info(
+                "Hard-reset soft-surrogate gradients: forward reset "
+                "and refractory clamping remain hard; voltage derivatives follow "
+                "the unclamped integration and soft-reset rule."
+            )
         gauss_std = resolve_renamed_option(
             "spike_surrogate_width", spike_surrogate_width, "gauss_std", gauss_std, 0.28
         )
@@ -808,6 +821,7 @@ class GLIF3Cell(tf.keras.layers.Layer):
             train_recurrent=train_recurrent,
             train_recurrent_per_type=train_recurrent_per_type,
             track_voltage_penalty=track_voltage_penalty,
+            hard_reset_gradient_mode=hard_reset_gradient_mode,
         )
         execution, self.acceleration_report = resolve_acceleration_options(
             execution, compute_dtype=self.compute_dtype, variable_dtype=self.variable_dtype,
@@ -2797,6 +2811,7 @@ class GLIF3Cell(tf.keras.layers.Layer):
                     dampening=self._dampening_factor,
                     voltage_gradient_dampening=self._voltage_gradient_dampening,
                     hard_reset=self._hard_reset,
+                    hard_reset_gradient_mode=self.hard_reset_gradient_mode,
                     detach_reset=self.detach_reset,
                     detach_asc_reset=self.detach_asc_reset,
                     pseudo_gauss=self._pseudo_gauss,
@@ -2832,6 +2847,7 @@ class GLIF3Cell(tf.keras.layers.Layer):
                 rise_voltage=self.rise_voltage,
                 reset_voltage=self.v_reset,
                 hard_reset=self._hard_reset,
+                hard_reset_gradient_mode=self.hard_reset_gradient_mode,
             )
             new_z = (
                 spike_gauss(new_v - self.v_th, self._gauss_std, self._dampening_factor)
@@ -2853,6 +2869,7 @@ class GLIF3Cell(tf.keras.layers.Layer):
                 hard_reset=self._hard_reset,
                 detach_reset=self.detach_reset,
                 detach_asc_reset=self.detach_asc_reset,
+                hard_reset_gradient_mode=self.hard_reset_gradient_mode,
             )
             new_asc = tf.reshape(adaptation, [batch_size, self._n_neurons * 2])
             new_z = tf.cast(new_z, z_buf.dtype)

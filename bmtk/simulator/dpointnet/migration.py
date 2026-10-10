@@ -52,5 +52,7 @@ def preserve_previous_defaults(config):
         and cell.get("hard_reset") is None
     ):
         cell["hard_reset"] = True
+    cell.setdefault("hard_reset", False)
+    cell.setdefault("hard_reset_gradient_mode", "exact")
     cell["acceleration_profile"] = "auto"
     return result

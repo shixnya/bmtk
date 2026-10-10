@@ -10,6 +10,11 @@ Custom objectives and callbacks are regular user extension points, not
 changes to BMTK itself. Follow :doc:`dpointnet_custom_training` for complete
 Python definitions, registration, JSON configuration and a runnable launcher.
 
+New NEST GLIF configurations default to hard-reset forward dynamics with
+approximate soft-reset-style voltage derivatives; see
+:doc:`dpointnet_hard_reset_training`. Explicit ``hard_reset=false`` retains
+soft-reset training. Existing examples preserve their original reset policies.
+
 Choose an experiment
 --------------------
 

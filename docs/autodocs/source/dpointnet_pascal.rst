@@ -6,10 +6,10 @@ Read this page only if deploying on those devices.
 
 .. warning::
 
-   General NEST-compatible execution on Pascal is not fully validated. Earlier
-   complete regression testing failed, including fused neuron-state launch
-   errors. Passing individual kernels or LGN input tests does not establish
-   support for your full model or long training run.
+   Architecture coverage alone is not workload qualification. Automatic routing
+   now admits compatible Pascal CSR currents and repaired NEST state kernels,
+   but initialization, training and inference still need measured VRAM headroom
+   for your batch, connectivity and inputs.
 
 Before choosing a Pascal GPU
 ----------------------------
@@ -19,8 +19,13 @@ Before choosing a Pascal GPU
 * If using custom operators, include architecture 61 explicitly and verify
   both operator manifests; see :doc:`dpointnet_performance`. It is absent
   from the implicit build target list.
-* Keep automatic acceleration rather than forcing native/packed flags from
-  a newer GPU. Automatic selection is conservative on Pascal.
+* Keep automatic acceleration rather than forcing packed flags from a newer
+  GPU. It selects SM61 CSR currents, active queues and eligible native
+  accumulation, while retaining canonical-gradient boundaries.
+* Rebuild both operators from this source. Generic NEST launches now use
+  kernel-specific occupancy limits. Automatic state admission checks a
+  defaulted ``launch_geometry_version`` capability attribute; an old unmarked
+  library is not admitted even if its manifest advertises SM61.
 * Check the actual workload's initialization and update memory. Titan Xp
   has more memory than GTX1080Ti; fitting one does not establish fitting both.
 * Test the configured dynamics, precision, inputs, updates and restoration.
@@ -29,6 +34,22 @@ Before choosing a Pascal GPU
 NEST-compatible dynamics remain the default. Explicit legacy dynamics are
 available for legacy reproduction, not as a scientifically equivalent
 workaround for a NEST-compatible-mode device failure.
+
+Why the native current route matters
+------------------------------------
+
+Unfused input projection can materialize large temporary connection tensors.
+In the measured 66,658-neuron batch-10 V1 inference, the old Pascal fallback
+exceeded memory headroom for hard reset and ran out of memory for soft reset.
+With the existing SM61 native CSR current route, the same paired protocol
+passed on GTX1080Ti at 5.16/5.18 GiB peak TensorFlow allocation. Do not extrapolate
+this to batch-32 BPTT, whose temporal tape and optimizer add memory.
+
+cuDNN compatibility is a separate surface: some convolution shapes are not
+supported on Pascal by recent cuDNN. The synchronization-loss regression uses
+a CPU-placed independent convolution oracle while retaining the actual
+DPointNet value/gradient calculation on GPU and unchanged strict tolerances.
+This does not install a general CPU fallback in the model.
 
 Visual inputs
 -------------
