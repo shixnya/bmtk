@@ -238,6 +238,14 @@ native CSR currents. The old unaccelerated Pascal input projection exceeded
 headroom or ran out of memory. This is an inference-memory result, not a
 qualification of batch-32 training on an 11-GiB device.
 
+The consolidated automatic Pascal route also passed actual V1 startup on
+GTX1080Ti: three accepted hard-surrogate updates, finite/changed masters,
+constraints and strict model/optimizer restoration at batch eight,
+500 steps and 25-step checkpoints. Peak TensorFlow allocation was 6.12 GiB.
+The matched soft-reset control also passed. See :doc:`dpointnet_pascal`
+for complete test coverage, timing boundaries and memory scope.
+This is separate from the completed batch-32, twenty-epoch training above.
+
 Small runnable demonstration
 -----------------------------
 

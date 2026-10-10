@@ -51,6 +51,33 @@ a CPU-placed independent convolution oracle while retaining the actual
 DPointNet value/gradient calculation on GPU and unchanged strict tolerances.
 This does not install a general CPU fallback in the model.
 
+Measured qualification
+----------------------
+
+On GTX1080Ti with TensorFlow 2.21/CUDA 12.9 and both rebuilt cluster-fat
+operators, the full DPointNet run passed 2,424 cases and skipped 29.
+Its only failure was the independent convolution reference VJP being placed
+on GPU after a CPU forward. The corrected reference ran on CPU; a scoped
+25-case recovery passed, explicitly asserting that the actual DPointNet
+loss and gradient stayed on GPU. This provides 2,425 unique passing cases
+with the original failure receipt preserved, not a second full green run.
+
+The actual 66,658-neuron V1 network then passed three accepted updates each
+with hard-surrogate and soft-reset training at batch eight, 500 steps and
+25-step checkpoints. Both used automatically selected native currents,
+state/event VJPs and recurrent accumulation, checked finite updates and
+constraints, and strictly restored model and optimizer state.
+Peak TensorFlow allocation was 6.12 GiB for hard and 6.04 GiB for soft.
+The two post-trace updates took about 5.8 seconds each; these are startup
+measurements, not a twenty-sample full-training benchmark or convergence study.
+
+A separate four-workload CSR forward/VJP benchmark used three excluded
+warmups and twenty synchronized samples for each route, including canonical
+gradient restoration. Winners varied with batch and activity; isolated
+packed results do not establish a universally fastest full-training route.
+Packed Pascal flags therefore remain explicit, not automatically forced.
+Batch-32 V1 training on an 11-GiB device is not qualified by these results.
+
 Visual inputs
 -------------
 
